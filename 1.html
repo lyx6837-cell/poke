@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tailwind + PokeAPI 寶可夢圖鑑</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans pb-10">
+
+    <header class="bg-red-500 text-white p-6 shadow-md text-center relative">
+        <h1 class="text-3xl font-extrabold tracking-wider">🌟 寶可夢圖鑑 Pokédex</h1>
+        <p class="text-sm mt-2 opacity-80">中英文對照版 | 支援載入更多</p>
+    </header>
+
+    <main class="container mx-auto px-4 py-8">
+        
+        <div class="mb-8 flex flex-col sm:flex-row justify-center items-center gap-3">
+            <input 
+                type="text" 
+                id="searchInput" 
+                placeholder="輸入英文名稱或編號 (例: pikachu, 25)" 
+                class="border-2 border-gray-300 rounded-xl px-4 py-3 w-full max-w-md focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-200 transition shadow-sm text-gray-700"
+            >
+            <div class="flex gap-2 w-full sm:w-auto">
+                <button 
+                    id="searchBtn" 
+                    class="bg-red-500 text-white px-6 py-3 rounded-xl hover:bg-red-600 transition font-bold shadow-md w-full sm:w-auto flex-1"
+                >
+                    搜尋 🔍
+                </button>
+                <button 
+                    id="resetBtn" 
+                    class="bg-gray-500 text-white px-6 py-3 rounded-xl hover:bg-gray-600 transition font-bold shadow-md w-full sm:w-auto flex-1 hidden"
+                >
+                    返回列表
+                </button>
+            </div>
+        </div>
+
+        <div id="statusMessage" class="text-center text-gray-500 text-xl font-bold my-10">
+            連接洛托姆圖鑑中，請稍候...
+        </div>
+
+        <div id="pokedex" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 hidden">
+            </div>
+
+        <div id="loadMoreContainer" class="text-center mt-12 hidden">
+            <button 
+                id="loadMoreBtn" 
+                class="bg-blue-500 text-white px-8 py-4 rounded-full hover:bg-blue-600 transition font-bold shadow-lg text-lg flex items-center justify-center mx-auto gap-2"
+            >
+                <span>載入更多寶可夢</span>
+                <span id="loadMoreSpinner" class="hidden animate-spin">⏳</span>
+            </button>
+        </div>
+    </main>
+
+    <script>
+        const pokedexContainer = document.getElementById('pokedex');
+        const statusMessage = document.getElementById('statusMessage');
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
+        const loadMoreSpinner = document.getElementById('loadMoreSpinner');
+        
+        // --- 變數狀態管理 (新增) ---
+        let currentOffset = 0;   // 目前抓到第幾隻
+        const limit = 20;        // 每次抓幾隻
+        let allLoadedPokemon = []; // 儲存所有已載入的寶可夢資料，方便搜尋後切換回來
+        let isSearching = false; // 判斷目前是否在搜尋模式
+
+        // 🎤 語音功能
+        function speakName(name) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); 
+                const utterance = new SpeechSynthesisUtterance(name);
+                utterance.lang = 'en-US';
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // 🌟 抓取單隻寶可夢資料 (包含中文名)
+        async function getPokemonData(query) {
+            const pokeRes = await fetch(`https://pokeapi.co/api/v2/pokemon/${query}`);
+            if (!pokeRes.ok) throw new Error("找不到該寶可夢");
+            const pokeData = await pokeRes.json();
+
+            const speciesRes = await fetch(pokeData.species.url);
+            const speciesData = await speciesRes.json();
+
+            const zhNameObj = speciesData.names.find(n => n.language.name === 'zh-Hant') || 
+                              speciesData.names.find(n => n.language.name === 'zh-Hans');
+            
+            return {
+                ...pokeData,
+                chineseName: zhNameObj ? zhNameObj.name : pokeData.name
+            };
+        }
+
+        // 📝 產生單張卡片的 HTML 字串 (獨立成一個函數)
+        function createCardHTML(pokemon) {
+            const types = pokemon.types.map(t => {
+                return `<span class="px-3 py-1 text-xs font-bold rounded-full bg-gray-200 text-gray-700 uppercase shadow-sm">${t.type.name}</span>`;
+            }).join('');
+            const paddedId = pokemon.id.toString().padStart(3, '0');
+            const imageUrl = pokemon.sprites.other['official-artwork'].front_default || pokemon.sprites.front_default;
+
+            return `
+            <div class="relative bg-white rounded-2xl shadow-md p-6 flex flex-col items-center transform transition duration-300 hover:-translate-y-2 hover:shadow-2xl">
+                <button onclick="speakName('${pokemon.name}')" class="absolute top-4 right-4 bg-gray-100 hover:bg-blue-100 text-xl p-2 rounded-full transition shadow-sm" title="聽聽看英文名字">🔊</button>
+                <div class="bg-gray-50 w-full rounded-xl flex justify-center py-4 mb-4">
+                    <img class="w-32 h-32 object-contain drop-shadow-md" src="${imageUrl}" alt="${pokemon.name}">
+                </div>
+                <span class="text-sm text-gray-400 font-bold tracking-widest">#${paddedId}</span>
+                <h2 class="text-2xl font-black mt-1 text-gray-800">${pokemon.chineseName}</h2>
+                <p class="text-sm text-gray-500 font-medium capitalize mb-2">${pokemon.name}</p>
+                <div class="flex gap-2 mt-2">${types}</div>
+            </div>
+            `;
+        }
+
+        // 🚀 核心功能：載入更多寶可夢批次
+        async function loadPokemonBatch() {
+            // 如果是第一次載入，顯示主畫面 Loading；如果是按鈕載入，按鈕顯示旋轉特效
+            if (currentOffset === 0) {
+                showLoading("連接洛托姆圖鑑中，請稍候...");
+            } else {
+                loadMoreBtn.disabled = true;
+                loadMoreSpinner.classList.remove('hidden');
+            }
+
+            try {
+                const promises = [];
+                // 產生新批次的請求，例如 offset=20，就會抓 21~40
+                for (let i = currentOffset + 1; i <= currentOffset + limit; i++) {
+                    promises.push(getPokemonData(i));
+                }
+                
+                const newBatch = await Promise.all(promises);
+                
+                // 把新抓到的寶可夢存進總列表中
+                allLoadedPokemon = [...allLoadedPokemon, ...newBatch];
+                
+                // 將新資料轉換成 HTML 並「接續」在容器後面，而不是清空
+                const newHtml = newBatch.map(createCardHTML).join('');
+                pokedexContainer.insertAdjacentHTML('beforeend', newHtml);
+                
+                // 更新計數器
+                currentOffset += limit;
+
+                // 隱藏狀態訊息，顯示圖鑑與載入更多按鈕
+                statusMessage.classList.add('hidden');
+                pokedexContainer.classList.remove('hidden');
+                loadMoreContainer.classList.remove('hidden');
+
+            } catch (error) {
+                console.error(error);
+                if (currentOffset === 0) showError("讀取失敗，請重新整理頁面。");
+                else alert("載入更多時發生錯誤，請稍後再試。");
+            } finally {
+                // 恢復按鈕狀態
+                loadMoreBtn.disabled = false;
+                loadMoreSpinner.classList.add('hidden');
+            }
+        }
+
+        // 🔍 搜尋功能 (搜尋時隱藏載入更多按鈕)
+        async function searchPokemon() {
+            const query = searchInput.value.trim().toLowerCase(); 
+            if (!query) return alert("請輸入寶可夢英文名稱或編號！");
+
+            isSearching = true;
+            showLoading(`正在尋找 "${query}" ...`);
+            loadMoreContainer.classList.add('hidden'); // 隱藏載入更多按鈕
+            resetBtn.classList.remove('hidden'); 
+
+            try {
+                const data = await getPokemonData(query);
+                pokedexContainer.innerHTML = createCardHTML(data); // 清空並只顯示一張
+                statusMessage.classList.add('hidden');
+                pokedexContainer.classList.remove('hidden');
+            } catch (error) {
+                showError("找不到這隻寶可夢 😢 請確認英文拼字或編號是否正確。");
+            }
+        }
+
+        // 🔄 返回列表 (把原本存起來的卡片倒回去)
+        function resetView() {
+            isSearching = false;
+            searchInput.value = '';
+            resetBtn.classList.add('hidden');
+            
+            // 直接拿之前存好的資料重新渲染，瞬間完成！
+            pokedexContainer.innerHTML = allLoadedPokemon.map(createCardHTML).join('');
+            
+            statusMessage.classList.add('hidden');
+            pokedexContainer.classList.remove('hidden');
+            loadMoreContainer.classList.remove('hidden'); // 再次顯示載入更多按鈕
+        }
+
+        function showLoading(text) {
+            pokedexContainer.classList.add('hidden');
+            statusMessage.innerText = text;
+            statusMessage.classList.remove('hidden', 'text-red-500');
+            statusMessage.classList.add('text-gray-500');
+        }
+
+        function showError(text) {
+            pokedexContainer.classList.add('hidden');
+            statusMessage.innerText = text;
+            statusMessage.classList.remove('hidden', 'text-gray-500');
+            statusMessage.classList.add('text-red-500');
+        }
+
+        // --- 事件綁定 ---
+        searchBtn.addEventListener('click', searchPokemon);
+        searchInput.addEventListener('keypress', e => { if (e.key === 'Enter') searchPokemon(); });
+        resetBtn.addEventListener('click', resetView);
+        loadMoreBtn.addEventListener('click', loadPokemonBatch); // 綁定載入更多按鈕
+
+        // --- 初次啟動 ---
+        loadPokemonBatch();
+    </script>
+</body>
+</html>
